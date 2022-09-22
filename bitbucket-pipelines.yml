@@ -1,0 +1,63 @@
+image: python:3.8-slim
+definitions:
+  steps:
+    - step: &test
+        name: Test Step
+        script:
+          - apt-get update && apt-get install -y git gcc g++
+          - mkdir ~/.ssh/ && \
+          - echo "${SSH_PRIVATE_KEY}"|base64 -d > ~/.ssh/id_rsa && \
+          - chmod 600 ~/.ssh/id_rsa && \
+          - chmod 700 ~/.ssh && \
+          - touch ~/.ssh/known_hosts && \
+          - ssh-keyscan bitbucket.org >> ~/.ssh/known_hosts
+          - pip install --no-input -r requirements.txt
+          - python -m coverage run -m pytest
+          - python -m coverage report
+          - python -m coverage xml -o coverage_reports/coverage.xml
+    - step: &build
+        name: Build Step
+        script:
+          - export TAG=$(date "+%Y%m%d%H%M")-${BITBUCKET_COMMIT:0:7}
+          - echo $TAG
+          - echo $TAG > tag.txt
+          - docker build --build-arg PYPI_USERNAME=$PYPI_USERNAME --build-arg PYPI_PASSWORD=$PYPI_PASSWORD --build-arg SSH_PRIVATE_KEY="$(cat /opt/atlassian/pipelines/agent/ssh/id_rsa|base64 -w0)" --build-arg RELEASE=$TAG -t service_nameprod.azurecr.io/CALC-analysis:$TAG .
+          - docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD service_nameprod.azurecr.io
+          - docker push service_nameprod.azurecr.io/CALC-analysis:$TAG
+        services:
+          - docker
+        artifacts:
+          - tag.txt
+    - step: &deploy
+        name: Deploy Step
+        artifacts:
+          - tag.txt
+        script:
+          - export TAG=$(cat tag.txt)
+          - echo $TAG
+          - pipe: atlassian/trigger-pipeline:5.0.0
+            variables:
+              BITBUCKET_USERNAME: $BITBUCKET_USERNAME
+              BITBUCKET_APP_PASSWORD: $BITBUCKET_APP_PASSWORD
+              REPOSITORY: 'helm-charts'
+              ACCOUNT: 'service_name'
+              REF_TYPE: 'branch'
+              REF_NAME: 'main'
+              CUSTOM_PIPELINE_NAME: 'deploy-CALC-analysis-service'
+              PIPELINE_VARIABLES: >
+                [ { "key": "Release", "value": "$TAG" } ]
+              WAIT: 'true'
+              DEBUG: 'true'
+  services:
+    docker:
+      memory: 2048
+
+pipelines:
+  branches:
+    develop:
+      - step: *test
+    master:
+      - step: *build
+    deploy:
+      - step: *build
+      - step: *deploy

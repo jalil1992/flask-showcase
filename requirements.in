@@ -1,0 +1,15 @@
+# main
+flask-smorest
+Flask-WTF
+gunicorn
+python-dotenv
+structlog
+
+# dev && testing
+pre-commit
+pytest
+coverage
+
+
+# service_name repository
+--extra-index-url https://***.***
